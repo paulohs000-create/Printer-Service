@@ -1,170 +1,92 @@
 <!DOCTYPE html>
 <html lang="pt">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Printer Test</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 24px; }
-    .box { max-width: 520px; margin: 0 auto; }
-    h1 { font-size: 20px; margin-bottom: 12px; }
-    button { padding: 12px 16px; margin: 6px 6px 6px 0; cursor: pointer; }
-    input { padding: 10px; width: 100%; margin: 10px 0; box-sizing: border-box; }
-    pre { background: #f5f5f5; padding: 12px; overflow: auto; }
-    .ok { color: #0a7; }
-    .err { color: #c00; }
-    small { color: #666; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Printer Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/qz-tray/qz-tray.js"></script>
 </head>
 <body>
-  <div class="box">
-    <h1>Printer Test (QZ Tray)</h1>
 
-    <small>
-      Dica: abra o QZ Tray no Windows (ícone perto do relógio).
-      Se aparecer pedido de permissão, aceite.
-    </small>
+    <h2>Teste Impressão 58mm</h2>
+    <button onclick="imprimir()">IMPRIMIR TESTE</button>
 
-    <div style="margin-top: 14px;">
-      <label><b>Nome da impressora (Windows)</b></label>
-      <input id="printerName" value="POS-80" />
-      <small>Use exatamente como aparece em “Dispositivos e Impressoras”.</small>
-    </div>
+    <script>
 
-    <div style="margin-top: 10px;">
-      <button onclick="conectar()">Conectar QZ</button>
-      <button onclick="listarImpressoras()">Listar Impressoras</button>
-      <button onclick="imprimirTeste()">IMPRIMIR TESTE</button>
-      <button onclick="desconectar()">Desconectar</button>
-    </div>
-
-    <div style="margin-top: 12px;">
-      <div><b>Status:</b> <span id="status">Não conectado</span></div>
-      <pre id="log"></pre>
-    </div>
-  </div>
-
-  <!-- QZ Tray -->
-  <script src="https://cdn.jsdelivr.net/npm/qz-tray/qz-tray.js"></script>
-
-  <script>
-    const statusEl = document.getElementById('status');
-    const logEl = document.getElementById('log');
-    const printerNameEl = document.getElementById('printerName');
-
-    function log(msg) {
-      logEl.textContent += msg + "\n";
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-
-    function setStatus(txt, ok=true) {
-      statusEl.textContent = txt;
-      statusEl.className = ok ? 'ok' : 'err';
-    }
-
-    async function ensureConnected() {
-      if (!qz.websocket.isActive()) {
-        await qz.websocket.connect();
-        setStatus("Conectado ao QZ Tray ✅", true);
-        log("QZ conectado.");
-      } else {
-        setStatus("Conectado ao QZ Tray ✅", true);
-      }
-    }
-
-    async function conectar() {
-      try {
-        await ensureConnected();
-      } catch (e) {
-        setStatus("Falha ao conectar ❌", false);
-        log("Erro conectar: " + e);
-        alert("Falha ao conectar no QZ Tray. Verifique se o QZ está aberto.\n\n" + e);
-      }
-    }
-
-    async function desconectar() {
-      try {
-        if (qz.websocket.isActive()) {
-          await qz.websocket.disconnect();
-          setStatus("Desconectado", true);
-          log("QZ desconectado.");
-        } else {
-          setStatus("Já estava desconectado", true);
-        }
-      } catch (e) {
-        setStatus("Erro ao desconectar ❌", false);
-        log("Erro desconectar: " + e);
-      }
-    }
-
-    async function listarImpressoras() {
-      try {
-        await ensureConnected();
-        const printers = await qz.printers.find();
-        log("Impressoras encontradas:");
-        log(JSON.stringify(printers, null, 2));
-        alert("Impressoras:\n\n" + printers.join("\n"));
-      } catch (e) {
-        setStatus("Erro ao listar ❌", false);
-        log("Erro listar: " + e);
-        alert("Erro ao listar impressoras:\n\n" + e);
-      }
-    }
-
-    async function imprimirTeste() {
-      try {
-        await ensureConnected();
-
-        const printerName = (printerNameEl.value || "").trim();
-        if (!printerName) {
-          alert("Informe o nome da impressora.");
-          return;
+        async function conectarQZ() {
+            if (!qz.websocket.isActive()) {
+                await qz.websocket.connect();
+                console.log("Conectado ao QZ");
+            }
         }
 
-        // Cria config com o nome EXATO da impressora no Windows
-        const config = qz.configs.create(printerName);
+        window.onload = async function() {
+            try {
+                await conectarQZ();
+            } catch (err) {
+                console.error("Erro ao conectar QZ:", err);
+            }
+        };
 
-        // Texto simples + corte (ESC/POS)
-        // 58mm normalmente 32 colunas (depende do driver)
-        const dados = [
-          '\x1B\x40',                 // ESC @ (init)
-          '\x1B\x61\x01',             // ESC a 1 (centraliza)
-          'LOJA TESTE\n',
-          '\x1B\x61\x00',             // esquerda
-          '------------------------------\n',
-          'Ajuste de barra        10.00€\n',
-          'Ziper                  15.00€\n',
-          '------------------------------\n',
-          'TOTAL:                 25.00€\n',
-          '\n',
-          'Obrigado!\n',
-          '\n\n\n',
-          '\x1D\x56\x00'              // GS V 0 (corte total)
-        ];
+        async function imprimir() {
+            try {
 
-        await qz.print(config, dados);
-        log(`Impresso em "${printerName}" com corte.`);
-        setStatus("Impresso ✅", true);
+                await conectarQZ();
 
-      } catch (e) {
-        setStatus("Erro ao imprimir ❌", false);
-        log("Erro imprimir: " + e);
+                // ⚠️ ALTERE AQUI se o nome da impressora for diferente
+                const config = qz.configs.create("NOME_EXATO_DA_IMPRESSORA");
 
-        // Se imprimir mas não cortar, algumas POS-80 usam outro comando:
-        // '\x1D\x56\x42\x00' (corte parcial)
-        alert("Erro ao imprimir:\n\n" + e);
-      }
-    }
+                const dataAtual = new Date().toLocaleString("pt-PT");
 
-    // (Opcional) tenta conectar ao abrir a página
-    window.addEventListener('load', async () => {
-      try {
-        await ensureConnected();
-      } catch (e) {
-        // não força alerta no load, só loga
-        log("QZ não conectou automaticamente: " + e);
-      }
-    });
-  </script>
+                const reciboCliente = [
+                    '\x1B\x40', // reset
+
+                    '        LOJA TESTE\n',
+                    '        VIA CLIENTE\n',
+                    '--------------------------\n',
+                    'Data: ' + dataAtual + '\n',
+                    '--------------------------\n',
+                    'Ajuste de barra     10.00€\n',
+                    'Ziper               15.00€\n',
+                    '--------------------------\n',
+                    'TOTAL:              25.00€\n',
+                    '\n',
+                    'Obrigado!\n',
+                    '\n\n\n\n'
+                ];
+
+                const reciboLoja = [
+                    '\x1B\x40',
+
+                    '        LOJA TESTE\n',
+                    '         VIA LOJA\n',
+                    '--------------------------\n',
+                    'Data: ' + dataAtual + '\n',
+                    '--------------------------\n',
+                    'Ajuste de barra     10.00€\n',
+                    'Ziper               15.00€\n',
+                    '--------------------------\n',
+                    'TOTAL:              25.00€\n',
+                    '\n',
+                    'Arquivo Interno\n',
+                    '\n\n\n\n'
+                ];
+
+                const dados = [
+                    ...reciboCliente,
+                    '\x1D\x56\x00', // corte 1ª via
+
+                    ...reciboLoja,
+                    '\x1D\x56\x00'  // corte 2ª via
+                ];
+
+                await qz.print(config, dados);
+
+            } catch (err) {
+                alert("Erro ao imprimir: " + err);
+            }
+        }
+
+    </script>
+
 </body>
 </html>
