@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Printer Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/qz-tray/qz-tray.js"></script>
+</head>
+<body style="font-family: Arial; text-align:center; margin-top:50px;">
+
+<h2>Teste Impressora</h2>
+
+<button onclick="imprimir()" style="padding:15px 30px; font-size:18px;">
+  IMPRIMIR TESTE
+</button>
+
+<script>
+async function imprimir() {
+  try {
+    await qz.websocket.connect();
+
+    const printerName = "S260M";
+    const config = qz.configs.create(printerName);
+
+    const data = [
+      '\x1B\x40',
+      'LOJA TESTE\n',
+      '--------------------------\n',
+      'Teste de impressão\n',
+      'USB | 58mm | ESC/POS\n',
+      '--------------------------\n',
+      '\n\n\n',
+      '\x1D\x56\x00'
+    ];
+
+    await qz.print(config, data);
+    await qz.websocket.disconnect();
+
+    alert("Impresso com sucesso!");
+  } catch (err) {
+    alert("Erro ao imprimir: " + err);
+  }
+}
+</script>
+
+</body>
+</html>
