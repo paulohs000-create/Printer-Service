@@ -1,46 +1,50 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Printer Test</title>
-  <script src="https://cdn.jsdelivr.net/npm/qz-tray/qz-tray.js"></script>
+    <title>Printer Test</title>
 </head>
-<body style="font-family: Arial; text-align:center; margin-top:50px;">
+<body>
 
-<h2>Teste Impressora</h2>
+    <h2>Teste Impressão 58mm</h2>
+    <button onclick="imprimir()">Imprimir</button>
 
-<button onclick="imprimir()" style="padding:15px 30px; font-size:18px;">
-  IMPRIMIR TESTE
-</button>
+    <script src="https://cdn.jsdelivr.net/npm/qz-tray/qz-tray.js"></script>
 
-<script>
-async function imprimir() {
-  try {
-    await qz.websocket.connect();
+    <script>
 
-    const printerName = "S260M";
-    const config = qz.configs.create(printerName);
+        async function conectarQZ() {
+            if (!qz.websocket.isActive()) {
+                await qz.websocket.connect();
+                console.log("Conectado ao QZ");
+            }
+        }
 
-    const data = [
-      '\x1B\x40',
-      'LOJA TESTE\n',
-      '--------------------------\n',
-      'Teste de impressão\n',
-      'USB | 58mm | ESC/POS\n',
-      '--------------------------\n',
-      '\n\n\n',
-      '\x1D\x56\x00'
-    ];
+        async function imprimir() {
+            try {
 
-    await qz.print(config, data);
-    await qz.websocket.disconnect();
+                await conectarQZ();
 
-    alert("Impresso com sucesso!");
-  } catch (err) {
-    alert("Erro ao imprimir: " + err);
-  }
-}
-</script>
+                const config = qz.configs.create("S260M"); // nome exato no Windows
+
+                const dados = [
+                    '\x1B\x40',
+                    'PRINTER SERVICE TESTE\n',
+                    '--------------------------\n',
+                    'Item 1        10.00€\n',
+                    'Item 2        20.00€\n',
+                    '--------------------------\n',
+                    'TOTAL:        30.00€\n\n\n',
+                    '\x1D\x56\x00' // CORTE
+                ];
+
+                await qz.print(config, dados);
+
+            } catch (err) {
+                alert("Erro ao imprimir: " + err);
+            }
+        }
+
+    </script>
 
 </body>
 </html>
