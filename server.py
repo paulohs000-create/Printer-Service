@@ -121,28 +121,6 @@ def parse_money(v: str) -> float:
         return 0.0
 
 
-def parse_off_days(v: str) -> set[int]:
-    out = set()
-    for part in (v or "").split(","):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            i = int(part)
-        except Exception:
-            continue
-        if 0 <= i <= 6:
-            out.add(i)
-    return out
-
-
-def employee_off_days_set(employee: "Employee") -> set[int]:
-    return parse_off_days(getattr(employee, "off_days", "") or "")
-
-
-def is_employee_regular_off(employee: "Employee", day_local: date) -> bool:
-    return day_local.weekday() in employee_off_days_set(employee)
-
 
 # -----------------------------------------------------------------------------
 # Database
@@ -176,11 +154,7 @@ class Employee(Base):
     __tablename__ = "employees"
     id = Column(Integer, primary_key=True)
     name = Column(String(200), nullable=False, unique=True)
-    employee_type = Column(String(20), default="employee")  # employee / freelancer
-    daily_minutes = Column(Integer, default=480)    # 8h
-    weekly_minutes = Column(Integer, default=2400)  # 40h
-    off_days = Column(String(20), default="5,6")  # 0=seg ... 6=dom
-    hourly_rate = Column(String(20), default="")
+
 
     punches = relationship("Punch", back_populates="employee", cascade="all, delete-orphan")
     adjustments = relationship("DailyAdjustment", back_populates="employee", cascade="all, delete-orphan")
@@ -215,8 +189,6 @@ class DailyAdjustment(Base):
 def ensure_schema_upgrades():
     inspector = inspect(engine)
 
-    admin_columns = {c["name"] for c in inspector.get_columns("admin_users")}
-    if "role" not in admin_columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE admin_users ADD COLUMN role VARCHAR(20) DEFAULT 'admin';"))
             conn.execute(text("UPDATE admin_users SET role='admin' WHERE role IS NULL;"))
@@ -384,9 +356,7 @@ def worked_minutes_gross_for_day(db, emp_id: int, d_local: date) -> int:
 def expected_minutes_for_day(employee: Employee, day_local: date, day_off_flag: bool) -> int:
     if day_off_flag:
         return 0
-    if (employee.employee_type or "employee") == "freelancer":
-        return 0
-    if is_employee_regular_off(employee, day_local):
+
         return 0
     return int(employee.daily_minutes or 0)
 
@@ -643,7 +613,7 @@ def dashboard():
                 {
                     "id": e.id,
                     "name": e.name,
-                    "employee_type": e.employee_type,
+
                     "daily_minutes": e.daily_minutes,
                     "weekly_minutes": e.weekly_minutes,
                     "last_kind": last.kind if last else None,
@@ -747,7 +717,7 @@ def employees():
     db = SessionLocal()
     try:
         emps = db.execute(select(Employee).order_by(Employee.name.asc())).scalars().all()
-        return render_template("employees.html", employees=emps, weekday_labels=["Seg","Ter","Qua","Qui","Sex","Sáb","Dom"])
+
     finally:
         db.close()
 
@@ -759,9 +729,7 @@ def employees_update(emp_id: int):
     name = (request.form.get("name") or "").strip()
     daily = (request.form.get("daily_minutes") or "").strip()
     weekly = (request.form.get("weekly_minutes") or "").strip()
-    employee_type = (request.form.get("employee_type") or "employee").strip().lower()
-    hourly_rate = (request.form.get("hourly_rate") or "").strip()
-    off_days_values = [str(i) for i in range(7) if request.form.get(f"off_{i}") == "on"]
+
 
     def to_int(v, fallback):
         try:
@@ -779,11 +747,7 @@ def employees_update(emp_id: int):
         if name:
             emp.name = name
 
-        emp.employee_type = "freelancer" if employee_type == "freelancer" else "employee"
-        emp.daily_minutes = to_int(daily, emp.daily_minutes)
-        emp.weekly_minutes = to_int(weekly, emp.weekly_minutes)
-        emp.off_days = ",".join(off_days_values)
-        emp.hourly_rate = hourly_rate
+
 
         db.commit()
         flash("Funcionária atualizada.", "success")
@@ -918,8 +882,7 @@ def week():
         week_balance = total_net - total_expected
 
         # valor hora extra não salva; só cálculo na tela
-        rate_input = request.args.get("rate")
-        rate = parse_money(rate_input if rate_input is not None else (selected_emp.hourly_rate or ""))
+
         extra_minutes = max(0, week_balance)
         total_pay = (extra_minutes / 60.0) * rate if rate > 0 else 0.0
 
