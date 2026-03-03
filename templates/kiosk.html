@@ -12,7 +12,7 @@
     <thead>
       <tr>
         <th>Funcionária</th>
-        <th>Status</th>
+        <th>Hoje</th>
         <th>Ações</th>
         <th>Almoço / Folga</th>
       </tr>
@@ -23,12 +23,12 @@
         <td style="font-size:18px;"><strong>{{ s.name }}</strong></td>
 
         <td>
-          {% if s.last_kind %}
-            <strong>{{ s.last_kind }}</strong><br/>
-            <span class="muted">{{ s.last_at_local.strftime("%H:%M") }}</span>
-          {% else %}
-            <span class="muted">Sem marcações</span>
-          {% endif %}
+          <div class="muted">Entrada: <strong>{{ s.today_in.strftime('%H:%M') if s.today_in else '--:--' }}</strong></div>
+          <div class="muted">Saída: <strong>{{ s.today_out.strftime('%H:%M') if s.today_out else '--:--' }}</strong></div>
+          <div style="margin-top:6px;" class="muted">
+            Último: <strong>{{ s.last_kind if s.last_kind else '-' }}</strong>
+            {% if s.last_at_local %} ({{ s.last_at_local.strftime('%H:%M') }}){% endif %}
+          </div>
         </td>
 
         <td style="min-width:260px;">
