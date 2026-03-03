@@ -8,78 +8,105 @@
     Hoje: <strong>{{ today_local }}</strong> |
     Semana: <strong>{{ start_week }}</strong> até <strong>{{ end_week }}</strong>
   </div>
+  <div class="muted" style="margin-top:6px;">
+    <span class="badge">Saldo do dia</span> = (Trabalhado líquido - Esperado do dia) |
+    <span class="badge">Saldo da semana</span> = (Líquido semana - Esperado semana)
+  </div>
 </div>
 
-<div class="grid">
-  <div class="card">
-    <h3>Marcação de Ponto</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>Funcionária</th>
-          <th>Último ponto</th>
-          <th>Ações</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for s in status %}
-        <tr>
-          <td>
-            <strong>{{ s.name }}</strong><br/>
-            <span class="muted">Carga dia: {{ (s.daily_minutes // 60) }}h{{ "%02d"|format(s.daily_minutes % 60) }} |
-              semana: {{ (s.weekly_minutes // 60) }}h{{ "%02d"|format(s.weekly_minutes % 60) }}</span>
-          </td>
-          <td>
-            {% if s.last_kind %}
-              <strong>{{ s.last_kind }}</strong><br/>
-              <span class="muted">{{ s.last_at_local.strftime("%Y-%m-%d %H:%M") }}</span>
-            {% else %}
-              <span class="muted">Sem marcações</span>
-            {% endif %}
-          </td>
-          <td>
+<div class="card">
+  <h3>Funcionárias</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Funcionária</th>
+        <th>Ponto</th>
+        <th>Ajustes de hoje</th>
+        <th>Hoje</th>
+        <th>Semana</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in status %}
+      <tr>
+        <td>
+          <strong>{{ s.name }}</strong><br/>
+          <span class="muted">
+            Carga: {{ (s.daily_minutes // 60) }}h{{ "%02d"|format(s.daily_minutes % 60) }} / dia
+            · {{ (s.weekly_minutes // 60) }}h{{ "%02d"|format(s.weekly_minutes % 60) }} / semana
+          </span>
+        </td>
+
+        <td>
+          {% if s.last_kind %}
+            <strong>{{ s.last_kind }}</strong><br/>
+            <span class="muted">{{ s.last_at_local.strftime("%Y-%m-%d %H:%M") }}</span>
+          {% else %}
+            <span class="muted">Sem marcações</span>
+          {% endif %}
+          <div style="margin-top:8px;">
             <form method="post" action="{{ url_for('punch', emp_id=s.id, kind='IN') }}" style="display:inline;">
               <button class="btn btn-primary" {% if not s.can_in %}disabled{% endif %}>Entrada</button>
             </form>
             <form method="post" action="{{ url_for('punch', emp_id=s.id, kind='OUT') }}" style="display:inline;">
               <button class="btn btn-danger" {% if not s.can_out %}disabled{% endif %}>Saída</button>
             </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <p class="muted">Regra: Entrada só depois de Saída, e Saída só depois de Entrada.</p>
-  </div>
+          </div>
+        </td>
 
-  <div class="card">
-    <h3>Horas (Hoje / Semana)</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>Funcionária</th>
-          <th>Trabalhado</th>
-          <th>Hora extra</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in summaries %}
-        <tr>
-          <td><strong>{{ r.id }}</strong> (ID) <span class="muted">— veja o nome na tabela ao lado</span></td>
-          <td>
-            Hoje: <strong>{{ r.today }}</strong><br/>
-            Semana: <strong>{{ r.week }}</strong>
-          </td>
-          <td>
-            Hoje: <strong>{{ r.ot_today }}</strong><br/>
-            Semana: <strong>{{ r.ot_week }}</strong>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <p class="muted">Hora extra = acima da carga definida (dia/semana).</p>
-  </div>
+        <td style="min-width:240px;">
+          <form method="post" action="{{ url_for('set_today_adjustments', emp_id=s.id) }}">
+            <label class="muted">Almoço</label>
+            <select name="lunch_minutes">
+              <option value="0"  {% if s.lunch_minutes == 0 %}selected{% endif %}>0 min</option>
+              <option value="30" {% if s.lunch_minutes == 30 %}selected{% endif %}>30 min</option>
+              <option value="60" {% if s.lunch_minutes == 60 %}selected{% endif %}>1 hora</option>
+            </select>
+
+            <div style="margin-top:10px;">
+              <label>
+                <input type="checkbox" name="day_off" {% if s.day_off %}checked{% endif %} style="width:auto; margin-right:6px;">
+                Dia de folga (esperado = 0)
+              </label>
+            </div>
+
+            <div style="margin-top:10px;">
+              <button class="btn btn-gray" type="submit">Salvar ajustes</button>
+            </div>
+          </form>
+        </td>
+
+        <td>
+          <div class="muted">Bruto: <strong>{{ s.gross_today }}</strong></div>
+          <div class="muted">Líquido: <strong>{{ s.net_today }}</strong></div>
+          <div class="muted">Esperado: <strong>{{ s.expected_today }}</strong></div>
+          <div style="margin-top:6px;">
+            {% if s.balance_today.startswith('-') %}
+              <span class="neg">Saldo: {{ s.balance_today }}</span>
+            {% else %}
+              <span class="pos">Saldo: {{ s.balance_today }}</span>
+            {% endif %}
+          </div>
+        </td>
+
+        <td>
+          <div class="muted">Líquido: <strong>{{ s.net_week }}</strong></div>
+          <div class="muted">Esperado: <strong>{{ s.expected_week }}</strong></div>
+          <div style="margin-top:6px;">
+            {% if s.week_balance.startswith('-') %}
+              <span class="neg">Saldo: {{ s.week_balance }}</span>
+            {% else %}
+              <span class="pos">Saldo: {{ s.week_balance }}</span>
+            {% endif %}
+          </div>
+          <div class="muted" style="margin-top:6px;">
+            Se saldo > 00:00, paga extra. Se < 00:00, faltou horas.
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 
 {% endblock %}
