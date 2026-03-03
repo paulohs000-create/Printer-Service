@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Tablet - Ponto{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Tablet (Lançamento de Ponto)</h2>
+  <div class="muted">Hoje: <strong>{{ today_local }}</strong> — usuário tablet não pode ver relatórios nem editar funcionárias.</div>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Funcionária</th>
+        <th>Status</th>
+        <th>Ações</th>
+        <th>Almoço / Folga (hoje)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in items %}
+      <tr>
+        <td style="font-size:18px;"><strong>{{ s.name }}</strong></td>
+
+        <td>
+          {% if s.last_kind %}
+            <strong>{{ s.last_kind }}</strong><br/>
+            <span class="muted">{{ s.last_at_local.strftime("%H:%M") }}</span>
+          {% else %}
+            <span class="muted">Sem marcações</span>
+          {% endif %}
+        </td>
+
+        <td style="min-width:260px;">
+          <form method="post" action="{{ url_for('kiosk_punch', emp_id=s.id, kind='IN') }}" style="display:inline;">
+            <button class="btn btn-primary" style="font-size:18px;" {% if not s.can_in %}disabled{% endif %}>Entrada</button>
+          </form>
+          <form method="post" action="{{ url_for('kiosk_punch', emp_id=s.id, kind='OUT') }}" style="display:inline;">
+            <button class="btn btn-danger" style="font-size:18px;" {% if not s.can_out %}disabled{% endif %}>Saída</button>
+          </form>
+        </td>
+
+        <td style="min-width:260px;">
+          <form method="post" action="{{ url_for('kiosk_adjust', emp_id=s.id) }}">
+            <label class="muted">Almoço</label>
+            <select name="lunch_minutes" style="font-size:16px;">
+              <option value="0"  {% if s.lunch_minutes == 0 %}selected{% endif %}>0 min</option>
+              <option value="30" {% if s.lunch_minutes == 30 %}selected{% endif %}>30 min</option>
+              <option value="60" {% if s.lunch_minutes == 60 %}selected{% endif %}>1 hora</option>
+            </select>
+
+            <div style="margin-top:10px;">
+              <label style="font-size:16px;">
+                <input type="checkbox" name="day_off" {% if s.day_off %}checked{% endif %} style="width:auto; margin-right:6px;">
+                Dia de folga (esperado = 0)
+              </label>
+            </div>
+
+            <div style="margin-top:10px;">
+              <button class="btn btn-gray" type="submit">Salvar</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
