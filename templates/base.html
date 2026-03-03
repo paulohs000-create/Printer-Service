@@ -24,6 +24,9 @@
     .flash.error { background:#fee2e2; color:#991b1b; }
     .muted { color:#6b7280; font-size: 13px; }
     input, select { padding:10px 12px; border-radius:10px; border:1px solid #d1d5db; width:100%; }
+    .pos { color:#166534; font-weight:bold; }
+    .neg { color:#991b1b; font-weight:bold; }
+    .badge { display:inline-block; padding:4px 8px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:12px; }
   </style>
 </head>
 <body>
@@ -33,6 +36,7 @@
     {% if current_user.is_authenticated %}
       {% if current_user.role == 'admin' %}
         <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('week') }}">Semana</a>
         <a href="{{ url_for('employees') }}">Funcionárias</a>
         <a href="{{ url_for('report') }}">Relatório</a>
       {% else %}
