@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, date, timedelta, timezone, time
 from zoneinfo import ZoneInfo
 from functools import wraps
 
@@ -24,6 +24,7 @@ from sqlalchemy import (
     select,
     desc,
     text,
+    delete,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -32,21 +33,43 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 # -----------------------------------------------------------------------------
 APP_TZ = ZoneInfo("Europe/Lisbon")
 
+
 def utcnow():
     return datetime.now(timezone.utc)
 
-def to_local(dt_utc: datetime) -> datetime:
+
+def to_local(dt_utc: datetime) -> datetime | None:
     if dt_utc is None:
         return None
     if dt_utc.tzinfo is None:
         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
     return dt_utc.astimezone(APP_TZ)
 
+
 def parse_date(s: str) -> date | None:
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         return None
+
+
+def parse_hhmm(s: str) -> tuple[int, int] | None:
+    """
+    Aceita "HH:MM" (24h). Retorna (hh, mm) ou None.
+    """
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        hh, mm = s.split(":")
+        hh_i = int(hh)
+        mm_i = int(mm)
+        if not (0 <= hh_i <= 23 and 0 <= mm_i <= 59):
+            return None
+        return hh_i, mm_i
+    except Exception:
+        return None
+
 
 def minutes_to_hhmm(total_minutes: int) -> str:
     sign = ""
@@ -57,13 +80,22 @@ def minutes_to_hhmm(total_minutes: int) -> str:
     m = total_minutes % 60
     return f"{sign}{h:02d}:{m:02d}"
 
-def dt_range_utc(start_d: date, end_d: date):
-    start_local = datetime.combine(start_d, datetime.min.time(), tzinfo=APP_TZ)
-    end_local = datetime.combine(end_d + timedelta(days=1), datetime.min.time(), tzinfo=APP_TZ)
+
+def dt_range_utc_for_local_day(d: date):
+    start_local = datetime.combine(d, time(0, 0), tzinfo=APP_TZ)
+    end_local = start_local + timedelta(days=1)
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
+
+def local_dt_to_utc(d: date, hh: int, mm: int) -> datetime:
+    dt_local = datetime(d.year, d.month, d.day, hh, mm, tzinfo=APP_TZ)
+    return dt_local.astimezone(timezone.utc)
+
+
 def week_start(d: date) -> date:
+    # segunda-feira
     return d - timedelta(days=d.weekday())
+
 
 def parse_lunch(v: str) -> int:
     try:
@@ -73,6 +105,20 @@ def parse_lunch(v: str) -> int:
     if x not in (0, 30, 60):
         return 60
     return x
+
+
+def parse_money(v: str) -> float:
+    """
+    Aceita "12.50" ou "12,50"
+    """
+    v = (v or "").strip().replace(",", ".")
+    if not v:
+        return 0.0
+    try:
+        return float(v)
+    except Exception:
+        return 0.0
+
 
 # -----------------------------------------------------------------------------
 # Database
@@ -101,6 +147,7 @@ class AdminUser(Base, UserMixin):
     is_active = Column(Boolean, default=True)
     role = Column(String(20), default="admin")  # admin / kiosk
 
+
 class Employee(Base):
     __tablename__ = "employees"
     id = Column(Integer, primary_key=True)
@@ -111,6 +158,7 @@ class Employee(Base):
     punches = relationship("Punch", back_populates="employee", cascade="all, delete-orphan")
     adjustments = relationship("DailyAdjustment", back_populates="employee", cascade="all, delete-orphan")
 
+
 class Punch(Base):
     __tablename__ = "punches"
     id = Column(Integer, primary_key=True)
@@ -119,6 +167,7 @@ class Punch(Base):
     at_utc = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     employee = relationship("Employee", back_populates="punches")
+
 
 class DailyAdjustment(Base):
     __tablename__ = "daily_adjustments"
@@ -132,8 +181,9 @@ class DailyAdjustment(Base):
 
     employee = relationship("Employee", back_populates="adjustments")
 
+
 # -----------------------------------------------------------------------------
-# Schema upgrade (no Alembic)
+# Schema upgrade (sem Alembic)
 # -----------------------------------------------------------------------------
 def ensure_schema_upgrades():
     with engine.begin() as conn:
@@ -146,9 +196,11 @@ def ensure_schema_upgrades():
             conn.execute(text("ALTER TABLE admin_users ADD COLUMN role VARCHAR(20) DEFAULT 'admin';"))
             conn.execute(text("UPDATE admin_users SET role='admin' WHERE role IS NULL;"))
 
+
 def ensure_db():
     Base.metadata.create_all(engine)
     ensure_schema_upgrades()
+
 
 def seed_default_users_and_employees():
     admin_user = os.environ.get("ADMIN_USER", "admin")
@@ -184,19 +236,22 @@ def seed_default_users_and_employees():
     finally:
         db.close()
 
+
 # -----------------------------------------------------------------------------
-# Flask app (init DB at startup to avoid role error)
+# Flask app
 # -----------------------------------------------------------------------------
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
 app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
 
+# garante schema antes do Flask-Login buscar usuário
 ensure_db()
 seed_default_users_and_employees()
 
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.init_app(app)
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -205,6 +260,7 @@ def load_user(user_id):
         return db.get(AdminUser, int(user_id))
     finally:
         db.close()
+
 
 # -----------------------------------------------------------------------------
 # Auth helpers
@@ -222,6 +278,7 @@ def role_required(*roles):
         return wrapper
     return decorator
 
+
 # -----------------------------------------------------------------------------
 # Core helpers
 # -----------------------------------------------------------------------------
@@ -230,11 +287,14 @@ def get_last_punch(db, emp_id: int) -> Punch | None:
         select(Punch).where(Punch.employee_id == emp_id).order_by(desc(Punch.at_utc)).limit(1)
     ).scalar_one_or_none()
 
+
 def can_punch_in(last: Punch | None) -> bool:
     return (last is None) or (last.kind == "OUT")
 
+
 def can_punch_out(last: Punch | None) -> bool:
     return (last is not None) and (last.kind == "IN")
+
 
 def get_or_create_adjustment(db, emp_id: int, day_local: date) -> DailyAdjustment:
     key = day_local.strftime("%Y-%m-%d")
@@ -249,6 +309,7 @@ def get_or_create_adjustment(db, emp_id: int, day_local: date) -> DailyAdjustmen
     db.add(adj)
     db.flush()
     return adj
+
 
 def worked_minutes_gross_in_range(db, emp_id: int, start_utc: datetime, end_utc: datetime) -> int:
     punches = db.execute(
@@ -266,20 +327,80 @@ def worked_minutes_gross_in_range(db, emp_id: int, start_utc: datetime, end_utc:
             current_in = p.at_utc
         elif p.kind == "OUT":
             if current_in is not None and p.at_utc > current_in:
-                delta = p.at_utc - current_in
-                total += int(delta.total_seconds() // 60)
+                total += int((p.at_utc - current_in).total_seconds() // 60)
             current_in = None
     return total
+
+
+def worked_minutes_gross_for_day(db, emp_id: int, d_local: date) -> int:
+    s_utc, e_utc = dt_range_utc_for_local_day(d_local)
+    return worked_minutes_gross_in_range(db, emp_id, s_utc, e_utc)
+
 
 def expected_minutes_for_day(employee: Employee, day_local: date, day_off_flag: bool) -> int:
     if day_off_flag:
         return 0
-    if day_local.weekday() >= 5:
+    if day_local.weekday() >= 5:  # sáb/dom
         return 0
     return int(employee.daily_minutes or 0)
 
+
 def net_minutes_for_day(gross_minutes: int, lunch_minutes: int) -> int:
     return max(0, gross_minutes - max(0, lunch_minutes))
+
+
+def get_day_first_in_and_last_out(db, emp_id: int, d_local: date) -> tuple[datetime | None, datetime | None]:
+    s_utc, e_utc = dt_range_utc_for_local_day(d_local)
+    punches = db.execute(
+        select(Punch)
+        .where(Punch.employee_id == emp_id)
+        .where(Punch.at_utc >= s_utc)
+        .where(Punch.at_utc < e_utc)
+        .order_by(Punch.at_utc.asc())
+    ).scalars().all()
+
+    first_in = None
+    last_out = None
+    for p in punches:
+        if p.kind == "IN" and first_in is None:
+            first_in = p.at_utc
+        if p.kind == "OUT":
+            last_out = p.at_utc
+    return first_in, last_out
+
+
+def replace_day_punches(db, emp_id: int, d_local: date, entry_hhmm: str, exit_hhmm: str):
+    """
+    Admin: substitui os punches do dia (apaga e recria) para corrigir esquecimentos.
+    - Se entry vazio e exit vazio: apaga todos punches do dia.
+    - Se só entry: cria IN.
+    - Se entry+exit: cria IN e OUT.
+    """
+    s_utc, e_utc = dt_range_utc_for_local_day(d_local)
+
+    db.execute(
+        delete(Punch)
+        .where(Punch.employee_id == emp_id)
+        .where(Punch.at_utc >= s_utc)
+        .where(Punch.at_utc < e_utc)
+    )
+
+    ent = parse_hhmm(entry_hhmm)
+    exi = parse_hhmm(exit_hhmm)
+
+    if ent is None and exi is None:
+        return
+
+    if ent is not None:
+        in_utc = local_dt_to_utc(d_local, ent[0], ent[1])
+        db.add(Punch(employee_id=emp_id, kind="IN", at_utc=in_utc))
+
+    if ent is not None and exi is not None:
+        out_utc = local_dt_to_utc(d_local, exi[0], exi[1])
+        # se saída antes da entrada, considera inválido (não cria)
+        if out_utc > local_dt_to_utc(d_local, ent[0], ent[1]):
+            db.add(Punch(employee_id=emp_id, kind="OUT", at_utc=out_utc))
+
 
 # -----------------------------------------------------------------------------
 # Routes
@@ -287,6 +408,7 @@ def net_minutes_for_day(gross_minutes: int, lunch_minutes: int) -> int:
 @app.get("/health")
 def health():
     return {"ok": True}
+
 
 @app.get("/setup")
 def setup():
@@ -301,9 +423,11 @@ def setup():
         "kiosk_pass_env": "KIOSK_PASS (default tablet123)",
     }
 
+
 @app.get("/login")
 def login():
     return render_template("login.html")
+
 
 @app.post("/login")
 def login_post():
@@ -323,11 +447,13 @@ def login_post():
     finally:
         db.close()
 
+
 @app.get("/logout")
 @login_required
 def logout():
     logout_user()
     return redirect(url_for("login"))
+
 
 # ---------------- KIOSK ----------------
 @app.get("/kiosk")
@@ -343,6 +469,8 @@ def kiosk():
         for e in employees:
             last = get_last_punch(db, e.id)
             adj = get_or_create_adjustment(db, e.id, today_local)
+            first_in, last_out = get_day_first_in_and_last_out(db, e.id, today_local)
+
             items.append({
                 "id": e.id,
                 "name": e.name,
@@ -352,12 +480,15 @@ def kiosk():
                 "can_out": can_punch_out(last),
                 "lunch_minutes": int(adj.lunch_minutes or 0),
                 "day_off": bool(adj.day_off),
+                "today_in": to_local(first_in) if first_in else None,
+                "today_out": to_local(last_out) if last_out else None,
             })
 
         db.commit()
         return render_template("kiosk.html", items=items, today_local=today_local)
     finally:
         db.close()
+
 
 @app.post("/kiosk/punch/<int:emp_id>/<kind>")
 @login_required
@@ -392,6 +523,7 @@ def kiosk_punch(emp_id: int, kind: str):
     finally:
         db.close()
 
+
 @app.post("/kiosk/adjust/<int:emp_id>")
 @login_required
 @role_required("kiosk")
@@ -417,6 +549,7 @@ def kiosk_adjust(emp_id: int):
     finally:
         db.close()
 
+
 # ---------------- ADMIN ----------------
 @app.get("/")
 @login_required
@@ -427,19 +560,21 @@ def dashboard():
         employees = db.execute(select(Employee).order_by(Employee.name.asc())).scalars().all()
         today_local = datetime.now(APP_TZ).date()
 
-        start_today_utc, end_today_utc = dt_range_utc(today_local, today_local)
+        start_today_utc, end_today_utc = dt_range_utc_for_local_day(today_local)
         start_week = week_start(today_local)
         end_week = start_week + timedelta(days=6)
 
         status = []
         for e in employees:
             last = get_last_punch(db, e.id)
-            last_local = to_local(last.at_utc) if last else None
-
             adj = get_or_create_adjustment(db, e.id, today_local)
+            first_in, last_out = get_day_first_in_and_last_out(db, e.id, today_local)
 
             gross_today = worked_minutes_gross_in_range(db, e.id, start_today_utc, end_today_utc)
-            net_today = net_minutes_for_day(gross_today, adj.lunch_minutes)
+            # ✅ almoço só impacta se trabalhou naquele dia
+            lunch_today = int(adj.lunch_minutes or 0) if gross_today > 0 else 0
+            net_today = net_minutes_for_day(gross_today, lunch_today)
+
             expected_today = expected_minutes_for_day(e, today_local, adj.day_off)
             balance_today = net_today - expected_today
 
@@ -447,10 +582,10 @@ def dashboard():
             expected_week = 0
             d = start_week
             while d <= end_week:
-                d_start_utc, d_end_utc = dt_range_utc(d, d)
-                gross_d = worked_minutes_gross_in_range(db, e.id, d_start_utc, d_end_utc)
+                gross_d = worked_minutes_gross_for_day(db, e.id, d)
                 adj_d = get_or_create_adjustment(db, e.id, d)
-                net_d = net_minutes_for_day(gross_d, adj_d.lunch_minutes)
+                lunch_d = int(adj_d.lunch_minutes or 0) if gross_d > 0 else 0
+                net_d = net_minutes_for_day(gross_d, lunch_d)
                 exp_d = expected_minutes_for_day(e, d, bool(adj_d.day_off))
                 net_week += net_d
                 expected_week += exp_d
@@ -465,15 +600,21 @@ def dashboard():
                     "daily_minutes": e.daily_minutes,
                     "weekly_minutes": e.weekly_minutes,
                     "last_kind": last.kind if last else None,
-                    "last_at_local": last_local,
+                    "last_at_local": to_local(last.at_utc) if last else None,
                     "can_in": can_punch_in(last),
                     "can_out": can_punch_out(last),
+
+                    "today_in": to_local(first_in) if first_in else None,
+                    "today_out": to_local(last_out) if last_out else None,
+
                     "lunch_minutes": int(adj.lunch_minutes or 0),
                     "day_off": bool(adj.day_off),
+
                     "gross_today": minutes_to_hhmm(gross_today),
                     "net_today": minutes_to_hhmm(net_today),
                     "expected_today": minutes_to_hhmm(expected_today),
                     "balance_today": minutes_to_hhmm(balance_today),
+
                     "net_week": minutes_to_hhmm(net_week),
                     "expected_week": minutes_to_hhmm(expected_week),
                     "week_balance": minutes_to_hhmm(week_balance),
@@ -490,6 +631,7 @@ def dashboard():
         )
     finally:
         db.close()
+
 
 @app.post("/punch/<int:emp_id>/<kind>")
 @login_required
@@ -524,6 +666,7 @@ def punch(emp_id: int, kind: str):
     finally:
         db.close()
 
+
 @app.post("/adjustments/today/<int:emp_id>")
 @login_required
 @role_required("admin")
@@ -544,10 +687,11 @@ def set_today_adjustments(emp_id: int):
         adj.day_off = bool(day_off)
 
         db.commit()
-        flash(f"Ajustes salvos para {emp.name}.", "success")
+        flash(f"Ajustes de hoje salvos para {emp.name}.", "success")
         return redirect(url_for("dashboard"))
     finally:
         db.close()
+
 
 @app.get("/employees")
 @login_required
@@ -559,6 +703,7 @@ def employees():
         return render_template("employees.html", employees=emps)
     finally:
         db.close()
+
 
 @app.post("/employees/update/<int:emp_id>")
 @login_required
@@ -593,6 +738,7 @@ def employees_update(emp_id: int):
     finally:
         db.close()
 
+
 @app.get("/report")
 @login_required
 @role_required("admin")
@@ -619,11 +765,11 @@ def report():
 
             d = start_d
             while d <= end_d:
-                d_start_utc, d_end_utc = dt_range_utc(d, d)
-                gross_d = worked_minutes_gross_in_range(db, e.id, d_start_utc, d_end_utc)
-
+                gross_d = worked_minutes_gross_for_day(db, e.id, d)
                 adj_d = get_or_create_adjustment(db, e.id, d)
-                lunch_d = int(adj_d.lunch_minutes or 0)
+
+                # ✅ almoço só conta se houve trabalho no dia
+                lunch_d = int(adj_d.lunch_minutes or 0) if gross_d > 0 else 0
                 net_d = net_minutes_for_day(gross_d, lunch_d)
                 exp_d = expected_minutes_for_day(e, d, bool(adj_d.day_off))
 
@@ -647,13 +793,185 @@ def report():
             )
 
         db.commit()
-        return render_template("report.html", rows=rows, start=start_d.strftime("%Y-%m-%d"), end=end_d.strftime("%Y-%m-%d"))
+        return render_template(
+            "report.html",
+            rows=rows,
+            start=start_d.strftime("%Y-%m-%d"),
+            end=end_d.strftime("%Y-%m-%d"),
+        )
     finally:
         db.close()
+
+
+# ---------------- Semana (admin) ----------------
+@app.get("/week")
+@login_required
+@role_required("admin")
+def week():
+    db = SessionLocal()
+    try:
+        employees = db.execute(select(Employee).order_by(Employee.name.asc())).scalars().all()
+        if not employees:
+            flash("Nenhuma funcionária cadastrada.", "error")
+            return redirect(url_for("dashboard"))
+
+        emp_id = request.args.get("employee_id")
+        selected_emp = None
+        if emp_id:
+            selected_emp = db.get(Employee, int(emp_id))
+        if not selected_emp:
+            selected_emp = employees[0]
+
+        # semana escolhida
+        today = datetime.now(APP_TZ).date()
+        ws = parse_date(request.args.get("week_start") or "") or week_start(today)
+        ws = week_start(ws)
+        we = ws + timedelta(days=6)
+
+        # montar dados da semana
+        days = []
+        total_net = 0
+        total_expected = 0
+
+        d = ws
+        while d <= we:
+            adj = get_or_create_adjustment(db, selected_emp.id, d)
+            gross = worked_minutes_gross_for_day(db, selected_emp.id, d)
+            lunch_effective = int(adj.lunch_minutes or 0) if gross > 0 else 0
+            net = net_minutes_for_day(gross, lunch_effective)
+            exp = expected_minutes_for_day(selected_emp, d, bool(adj.day_off))
+            bal = net - exp
+
+            first_in, last_out = get_day_first_in_and_last_out(db, selected_emp.id, d)
+            in_local = to_local(first_in) if first_in else None
+            out_local = to_local(last_out) if last_out else None
+
+            days.append({
+                "date": d,
+                "label": ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"][d.weekday()],
+                "entry": in_local.strftime("%H:%M") if in_local else "",
+                "exit": out_local.strftime("%H:%M") if out_local else "",
+                "lunch_minutes": int(adj.lunch_minutes or 0),
+                "day_off": bool(adj.day_off),
+                "worked": minutes_to_hhmm(net),
+                "balance": minutes_to_hhmm(bal),
+            })
+
+            total_net += net
+            total_expected += exp
+            d += timedelta(days=1)
+
+        week_balance = total_net - total_expected
+
+        # valor hora extra não salva; só cálculo na tela
+        rate = parse_money(request.args.get("rate") or "")
+        extra_minutes = max(0, week_balance)
+        total_pay = (extra_minutes / 60.0) * rate if rate > 0 else 0.0
+
+        db.commit()
+        return render_template(
+            "week.html",
+            employees=employees,
+            selected_emp=selected_emp,
+            week_start_date=ws,
+            week_end_date=we,
+            days=days,
+            total_net=minutes_to_hhmm(total_net),
+            week_balance=minutes_to_hhmm(week_balance),
+            rate=str(rate).rstrip("0").rstrip(".") if rate else "",
+            total_pay=f"{total_pay:.2f}".replace(".", ","),
+        )
+    finally:
+        db.close()
+
+
+@app.post("/week/save")
+@login_required
+@role_required("admin")
+def week_save():
+    emp_id = int(request.form.get("employee_id"))
+    ws = parse_date(request.form.get("week_start")) or week_start(datetime.now(APP_TZ).date())
+    ws = week_start(ws)
+    we = ws + timedelta(days=6)
+
+    db = SessionLocal()
+    try:
+        emp = db.get(Employee, emp_id)
+        if not emp:
+            flash("Funcionária não encontrada.", "error")
+            return redirect(url_for("week"))
+
+        d = ws
+        while d <= we:
+            key = d.strftime("%Y-%m-%d")
+            entry = request.form.get(f"entry_{key}", "")
+            exit_ = request.form.get(f"exit_{key}", "")
+            lunch = request.form.get(f"lunch_{key}", "60")
+            day_off = request.form.get(f"off_{key}") == "on"
+
+            # punches do dia (substitui)
+            replace_day_punches(db, emp_id, d, entry, exit_)
+
+            # ajustes do dia
+            adj = get_or_create_adjustment(db, emp_id, d)
+            adj.lunch_minutes = parse_lunch(lunch)
+            adj.day_off = bool(day_off)
+
+            d += timedelta(days=1)
+
+        db.commit()
+        flash("Semana salva com sucesso.", "success")
+
+        # volta pra semana com o mesmo emp
+        return redirect(url_for("week", employee_id=emp_id, week_start=ws.strftime("%Y-%m-%d")))
+    finally:
+        db.close()
+
+
+@app.post("/week/reset")
+@login_required
+@role_required("admin")
+def week_reset():
+    emp_id = int(request.form.get("employee_id"))
+    ws = parse_date(request.form.get("week_start")) or week_start(datetime.now(APP_TZ).date())
+    ws = week_start(ws)
+    we = ws + timedelta(days=6)
+
+    db = SessionLocal()
+    try:
+        # apaga punches da semana (opcionalmente pode manter ajustes)
+        d = ws
+        while d <= we:
+            s_utc, e_utc = dt_range_utc_for_local_day(d)
+            db.execute(
+                delete(Punch)
+                .where(Punch.employee_id == emp_id)
+                .where(Punch.at_utc >= s_utc)
+                .where(Punch.at_utc < e_utc)
+            )
+            # também zera ajustes da semana
+            key = d.strftime("%Y-%m-%d")
+            adj = db.execute(
+                select(DailyAdjustment)
+                .where(DailyAdjustment.employee_id == emp_id)
+                .where(DailyAdjustment.day_local == key)
+            ).scalar_one_or_none()
+            if adj:
+                adj.lunch_minutes = 60
+                adj.day_off = False
+            d += timedelta(days=1)
+
+        db.commit()
+        flash("Semana zerada.", "success")
+        return redirect(url_for("week", employee_id=emp_id, week_start=ws.strftime("%Y-%m-%d")))
+    finally:
+        db.close()
+
 
 @app.errorhandler(403)
 def forbidden(_):
     return "Acesso negado.", 403
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
