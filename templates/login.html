@@ -3,19 +3,22 @@
 {% block content %}
 <div class="card" style="max-width:520px;margin:18px auto;">
   <h2>Login</h2>
-  <p class="muted">Use ADMIN_USER / ADMIN_PASS (Railway Variables). Padrão: admin / admin123</p>
+  <p class="muted">
+    Admin: ADMIN_USER / ADMIN_PASS (padrão: admin / admin123)<br/>
+    Tablet: KIOSK_USER / KIOSK_PASS (padrão: tablet / tablet123)
+  </p>
   <form method="post" action="{{ url_for('login_post') }}">
     <div style="margin-bottom:10px;">
       <label>Usuário</label>
-      <input name="username" placeholder="admin" required />
+      <input name="username" required />
     </div>
     <div style="margin-bottom:12px;">
       <label>Senha</label>
-      <input name="password" type="password" placeholder="admin123" required />
+      <input name="password" type="password" required />
     </div>
     <button class="btn btn-primary" type="submit">Entrar</button>
     <div class="muted" style="margin-top:12px;">
-      Primeira vez: acesse <code>/setup</code> para criar tabelas e 4 funcionárias.
+      Primeira vez: acesse <code>/setup</code>.
     </div>
   </form>
 </div>
